@@ -1,0 +1,813 @@
+diff -Naur linux-gpib-4.0.3/drivers/gpib/Makefile linux-gpib-4.0.3/drivers/gpib/Makefile
+--- linux-gpib-4.0.3/drivers/gpib/Makefile	2017-04-27 15:51:31.094348841 +0200
++++ linux-gpib-4.0.3/drivers/gpib/Makefile	2017-04-27 18:42:51.995177816 +0200
+@@ -17,5 +17,5 @@
+ obj-y += sys/
+ obj-y += tms9914/
+ obj-y += tnt4882/
+-
++obj-y += raspi_gpio/
+ 
+diff -Naur linux-gpib-4.0.3/drivers/gpib/raspi_gpio/Makefile linux-gpib-4.0.3/drivers/gpib/raspi_gpio/Makefile
+--- linux-gpib-4.0.3/drivers/gpib/raspi_gpio/Makefile	1970-01-01 01:00:00.000000000 +0100
++++ linux-gpib-4.0.3/drivers/gpib/raspi_gpio/Makefile	2017-04-27 18:43:16.070992663 +0200
+@@ -0,0 +1 @@
++obj-m += raspi_gpio.o
+diff -Naur linux-gpib-4.0.3/drivers/gpib/raspi_gpio/raspi_gpio.c linux-gpib-4.0.3/drivers/gpib/raspi_gpio/raspi_gpio.c
+--- linux-gpib-4.0.3/drivers/gpib/raspi_gpio/raspi_gpio.c	1970-01-01 01:00:00.000000000 +0100
++++ linux-gpib-4.0.3/drivers/gpib/raspi_gpio/raspi_gpio.c	2017-04-27 18:52:09.158893422 +0200
+@@ -0,0 +1,692 @@
++/**************************************************************************
++ *                      raspi_gpio.c  -  description                    *
++ *                           -------------------                          *
++ *  This code has been developed at the Institute of Sensor and Actuator  *
++ *  Systems (Technical University of Vienna, Austria) to enable the GPIO  *
++ *  lines (e.g. of a raspberry pi) to function as a GPIO master device    *
++ *                                                                        *
++ *  begin                : March 2016                                     *
++ *  copyright            : (C) 2016 Thomas Klima                          *
++ *  email                : elektronomikon@gmail.com                       *
++ *                                                                        *
++ *                                                                        *
++ *  Special Thanks go to: Marcello Carla'  -  carla@fi.infn.it		  *
++ *                        University of Florence - Dept. of Physics       *
++ *		for adding the interrupt-driven handshake		  *
++ *                                                                        *
++ *************************************************************************/
++
++/**************************************************************************
++ *                                                                        *
++ *   This program is free software; you can redistribute it and/or modify *
++ *   it under the terms of the GNU General Public License as published by *
++ *   the Free Software Foundation; either version 2 of the License, or    *
++ *   (at your option) any later version.                                  *
++ *                                                                        *
++ *************************************************************************/
++
++
++/*
++  not implemented:
++	SRQ Interrupt
++	parallel/serial polling
++	return2local?
++*/
++
++#include "raspi_gpio.h"
++
++MODULE_LICENSE("GPL");
++
++
++/***************************************************************************
++ *                                                                         *
++ * READ                                                                    *
++ *                                                                         *
++ ***************************************************************************/
++
++
++uint8_t bb_read_byte(int *end)
++{
++	uint8_t data;
++	struct timespec before, after;
++
++	_delay(DELAY);
++
++	/* Raise NRFD, informing the talker we are ready for the byte
++	gpio_direction_output(NRFD, 1);*/
++	gpio_direction_input(NRFD);
++
++	/* Wait for DAV to go low, informing us the byte is read to be read */
++	getnstimeofday(&before);
++	while (gpio_get_value(DAV) == 1) {
++		_delay(DELAY);
++		getnstimeofday(&after);
++		if (usec_diff(&after, &before) > TIMEOUT_US) {
++			dbg_printk("read_byte_timeout1\r\n");
++			return -ETIMEDOUT;
++		}
++	}
++
++	// Assert NRFD, informing the talker to not change the data lines
++	//gpio_set_value(NRFD, 0);
++	gpio_direction_output(NRFD, 0);
++	_delay(DELAY);
++
++	// Read the data on the port, flip the bits, and read in the EOI line
++
++	data = get_data_lines();
++	*end = !gpio_get_value(EOI);
++
++	_delay(DELAY);
++
++	// Un-assert NDAC, informing talker that we have accepted the byte
++	//gpio_set_value(NDAC, 1);
++	gpio_direction_input(NDAC);
++
++	// Wait for DAV to go high; the talkers knows that we have read the byte
++	getnstimeofday(&before);
++	while(gpio_get_value(DAV) == 0) {
++		_delay(DELAY);
++		getnstimeofday(&after);
++		if (usec_diff(&after, &before) > TIMEOUT_US) {
++			dbg_printk("read_byte_timeout2\r\n");
++			return -ETIMEDOUT;
++		}
++	}
++
++	gpio_direction_output(NDAC, 0);	// Get ready for the next byte by asserting NDAC
++
++        return data;
++}
++
++int bb_read(gpib_board_t *board, uint8_t *buffer, size_t length, int *end, size_t *bytes_read)
++{
++	bb_private_t *priv = board->private_data;
++	struct timespec before;
++
++	dbg_printk("RD(%ld) ", (long int)length);
++
++	SET_DIR_READ();
++	_delay(DELAY);
++
++	*end = 0;
++	*bytes_read = 0;
++	if (length == 0) return 0;
++
++	getnstimeofday(&before);
++	while(1) {
++		_delay(DELAY);
++
++		buffer[*bytes_read] = bb_read_byte(end);
++
++		if (buffer[*bytes_read] == (uint8_t)(-ETIMEDOUT))
++			return *bytes_read;
++
++		(*bytes_read)++;
++
++		if ((*bytes_read >= length) || (*end == 1) ||
++                check_for_eos(priv, buffer[*bytes_read-1])) break;
++
++    }
++
++	dbg_printk("\r\ngot %d bytes.\r\n", *bytes_read);
++
++	return *bytes_read;
++}
++
++int check_for_eos(bb_private_t *priv, uint8_t byte)
++{
++	static const uint8_t sevenBitCompareMask = 0x7f;
++
++	if ((priv->eos_flags & REOS) == 0) return 0;
++
++	if (priv->eos_flags & BIN) {
++		if (priv->eos == byte)
++			return 1;
++	} else {
++		if ((priv->eos & sevenBitCompareMask) == \
++			(byte & sevenBitCompareMask))
++			return 1;
++	}
++	return 0;
++}
++
++
++
++/***************************************************************************
++ *                                                                         *
++ * WRITE                                                                   *
++ *                                                                         *
++ ***************************************************************************/
++
++int bb_write(gpib_board_t *board, uint8_t *buffer, size_t length, int send_eoi, size_t *bytes_written)
++{
++	struct timespec before, after;
++	size_t i = 0;
++
++	if (DEBUG) {
++		dbg_printk("\r\nWR<%d> %s (", length, (send_eoi)?"w.EOI":" ");
++		for (i=0; i < length; i++) {
++			dbg_printk("%c=0x%x ", buffer[i], buffer[i]);
++		}
++		dbg_printk(")\r\n");
++	}
++
++	SET_DIR_WRITE();
++	gpio_direction_output(DAV, 1);
++	_delay(DELAY);
++
++	getnstimeofday(&before);
++	while ((gpio_get_value(NRFD) == 0) || (gpio_get_value(NDAC) == 1)) {
++		_delay(DELAY);
++		getnstimeofday(&after);
++		if (usec_diff(&after, &before) > TIMEOUT_US) {
++			printk("\r\nwrite timeout NDAC(%d)|NRFD(%d) S=%d!\r\n", gpio_get_value(NDAC), gpio_get_value(NRFD), bb_line_status(board));
++			return -ETIMEDOUT;
++		}
++	}
++
++	for (i=0; i < length; i++) {
++
++        gpio_direction_input(NRFD);
++
++		_delay(DELAY);
++
++		if ((i >= length-1) && send_eoi) {
++			gpio_direction_output(EOI, 0);
++		} else {
++			gpio_direction_output(EOI, 1);
++		}
++
++		_delay(DELAY);
++		getnstimeofday(&before);
++
++		while (gpio_get_value(NRFD) == 0) {
++			_delay(DELAY);
++			getnstimeofday(&after);
++			if (usec_diff(&after, &before) > TIMEOUT_US*10)
++			{
++				printk("\r\ntimeout NRF3(%d)@3\r\n", gpio_get_value(NRFD));
++				return -ETIMEDOUT;
++			}
++		}
++
++        gpio_direction_output(NRFD, 0);
++
++		set_data_lines(buffer[i]);
++
++		_delay(DELAY);
++
++		gpio_direction_output(DAV, 0);
++		_delay(DELAY);
++
++		getnstimeofday(&before);
++		while (gpio_get_value(NDAC) == 0) {
++			_delay(DELAY);
++			getnstimeofday(&after);
++			if (usec_diff(&after, &before) > TIMEOUT_US)
++			{
++                                printk("timeout NDAC(%d)@4\r\n", gpio_get_value(NDAC));
++				return -ETIMEDOUT;
++			}
++		}
++
++		gpio_direction_output(DAV, 1);
++	}
++
++	*bytes_written = i;
++
++	dbg_printk("sent %d bytes.\r\n\r\n", *bytes_written);
++
++	return i;
++}
++int bb_command(gpib_board_t *board, uint8_t *buffer, size_t length, size_t *bytes_written)
++{
++	size_t ret,i;
++
++	SET_DIR_WRITE();
++	gpio_direction_output(_ATN, 0);
++
++	if (DEBUG) {
++		dbg_printk("CMD(%d):\r\n", length);
++		for (i=0; i < length; i++) {
++			dbg_printk("0x%x=", buffer[i]);
++			if (buffer[i] & 0x40) {
++				dbg_printk("TLK%d", buffer[i]&0x1F);
++			} else if (buffer[i] & 0x20) {
++				dbg_printk("LSN%d", buffer[i]&0x1F);
++			}
++			dbg_printk("\r\n");
++		}
++	}
++
++	ret = bb_write(board, buffer, length, 0, bytes_written);
++	gpio_direction_output(_ATN, 1);
++
++	return *bytes_written;
++}
++
++
++/***************************************************************************
++ *                                                                         *
++ * STATUS Management                                                       *
++ *                                                                         *
++ ***************************************************************************/
++
++
++int bb_take_control(gpib_board_t *board, int synchronous)
++{
++	_delay(DELAY);
++	gpio_direction_output(_ATN, 0);
++        set_bit(CIC_NUM, &board->status);
++	return 0;
++}
++
++int bb_go_to_standby(gpib_board_t *board)
++{
++	_delay(DELAY);
++	gpio_direction_output(_ATN, 1);
++	return 0;
++}
++
++void bb_request_system_control(gpib_board_t *board, int request_control )
++{
++	_delay(DELAY);
++        if (request_control)
++                set_bit(CIC_NUM, &board->status);
++        else
++                clear_bit(CIC_NUM, &board->status);
++}
++
++void bb_interface_clear(gpib_board_t *board, int assert)
++{
++	_delay(DELAY);
++	if (assert)
++		gpio_direction_output(IFC, 0);
++	else
++		gpio_direction_output(IFC, 1);
++}
++
++void bb_remote_enable(gpib_board_t *board, int enable)
++{
++	_delay(DELAY);
++	if (enable) {
++                set_bit(REM_NUM, &board->status);
++		gpio_direction_output(REN, 0);
++	} else {
++                clear_bit(REM_NUM, &board->status);
++		gpio_direction_output(REN, 1);
++	}
++}
++
++int bb_enable_eos(gpib_board_t *board, uint8_t eos_byte, int compare_8_bits)
++{
++	bb_private_t *priv = board->private_data;
++	dbg_printk("EOS_en ");
++
++        priv->eos = eos_byte;
++        priv->eos_flags = REOS;
++        if (compare_8_bits) priv->eos_flags |= BIN;
++
++	return 0;
++}
++
++void bb_disable_eos(gpib_board_t *board)
++{
++	bb_private_t *priv = board->private_data;
++	dbg_printk("EOS_dis ");
++
++	priv->eos_flags &= ~REOS;
++}
++
++unsigned int bb_update_status(gpib_board_t *board, unsigned int clear_mask )
++{
++	dbg_printk("\r\nUS 0x%lx mask 0x%x\r\n",board->status, clear_mask);
++	board->status &= ~clear_mask;
++
++	return board->status;
++}
++
++void bb_primary_address(gpib_board_t *board, unsigned int address)
++{
++	dbg_printk("PA(%d) ", address);
++	board->pad = address;
++}
++
++void bb_secondary_address(gpib_board_t *board, unsigned int address, int enable)
++{
++	dbg_printk("SA(%d %d) ", address, enable);
++
++	if (enable)
++		board->sad = address;
++}
++
++int bb_parallel_poll(gpib_board_t *board, uint8_t *result)
++{
++	dbg_printk("PP ");
++	return 0;
++}
++void bb_parallel_poll_configure(gpib_board_t *board, uint8_t config )
++{
++	dbg_printk("PPC ");
++}
++void bb_parallel_poll_response(gpib_board_t *board, int ist )
++{
++}
++void bb_serial_poll_response(gpib_board_t *board, uint8_t status)
++{
++}
++uint8_t bb_serial_poll_status(gpib_board_t *board )
++{
++	return 0;
++}
++unsigned int bb_t1_delay(gpib_board_t *board, unsigned int nano_sec )
++{
++	_delay(nano_sec/1000 + 1);
++
++	return 0;
++}
++void bb_return_to_local(gpib_board_t *board )
++{
++	dbg_printk("R2L\r\n ");
++}
++
++int bb_line_status(const gpib_board_t *board )
++{
++	int line_status = 0x00;
++
++        if (gpio_get_value(REN) == 1) line_status |= BusREN;
++        if (gpio_get_value(IFC) == 1) line_status |= BusIFC;
++        if (gpio_get_value(NDAC) == 0) line_status |= BusNDAC;
++        if (gpio_get_value(NRFD) == 0) line_status |= BusNRFD;
++        if (gpio_get_value(DAV) == 0) line_status |= BusDAV;
++        if (gpio_get_value(EOI) == 0) line_status |= BusEOI;
++        if (gpio_get_value(_ATN) == 0) line_status |= BusATN;
++        if (gpio_get_value(SRQ) == 1) line_status |= BusSRQ;
++	return line_status;
++}
++
++
++/***************************************************************************
++ *                                                                         *
++ * Module Management                                                       *
++ *                                                                         *
++ ***************************************************************************/
++
++
++gpib_interface_t bb_interface =
++{
++	name:	"raspi_gpio",
++	attach:		bb_attach,
++	detach:		bb_detach,
++	read:		bb_read,
++	write:		bb_write,
++	command:	bb_command,
++	take_control:	bb_take_control,
++	go_to_standby:	bb_go_to_standby,
++	request_system_control:	bb_request_system_control,
++	interface_clear:	bb_interface_clear,
++	remote_enable:	bb_remote_enable,
++	enable_eos:	bb_enable_eos,
++	disable_eos:	bb_disable_eos,
++	parallel_poll:	bb_parallel_poll,
++	parallel_poll_configure:	bb_parallel_poll_configure,
++	parallel_poll_response:	bb_parallel_poll_response,
++	line_status:	bb_line_status,
++	update_status:	bb_update_status,
++	primary_address:	bb_primary_address,
++	secondary_address:	bb_secondary_address,
++	serial_poll_response:	bb_serial_poll_response,
++	serial_poll_status:	bb_serial_poll_status,
++	t1_delay: bb_t1_delay,
++	return_to_local: bb_return_to_local,
++};
++
++static int allocate_private(gpib_board_t *board)
++{
++	board->private_data = kmalloc(sizeof(bb_private_t), GFP_KERNEL);
++	if (board->private_data == NULL)
++		return -1;
++	memset(board->private_data, 0, sizeof(bb_private_t));
++	return 0;
++}
++
++static void free_private(gpib_board_t *board)
++{
++	if (board->private_data) {
++		kfree(board->private_data);
++		board->private_data = NULL;
++	}
++}
++
++struct timespec last_irq;
++
++irqreturn_t bb_interrupt(int irq, void *arg PT_REGS_ARG)
++{
++        unsigned long flags;
++	struct timespec current_time;
++
++        local_irq_save(flags);
++
++        getnstimeofday(&current_time);
++	if (usec_diff(&current_time, &last_irq) < IRQ_DEBOUNCE_US) {
++		return IRQ_NONE;
++	}
++
++	dbg_printk("IRQ! (last was %ld ms ago)\r\n", (long int)msec_diff(&current_time, &last_irq));
++
++        local_irq_restore(flags);
++
++	getnstimeofday(&last_irq);
++
++        return IRQ_HANDLED;
++}
++
++int bb_attach(gpib_board_t *board, gpib_board_config_t config)
++{
++	bb_private_t *bb_priv;
++
++	dbg_printk("ATTACH \r\n");
++
++	board->status = 0;
++	if (allocate_private(board))
++		return -ENOMEM;
++	bb_priv = board->private_data;
++
++	SET_DIR_WRITE();
++
++	bb_priv->irq = gpio_to_irq(SRQ);
++
++	if (request_irq(bb_priv->irq, bb_interrupt, IRQF_TRIGGER_FALLING, "gpib_bitbang", board)) {
++		printk("gpib: can't request IRQ %d\n", board->ibirq);
++		return -1;
++	}
++	dbg_printk("IRQ=%d registered\r\n", bb_priv->irq);
++	getnstimeofday(&last_irq); // initialize debounce
++
++	return 0;
++}
++
++void bb_detach(gpib_board_t *board)
++{
++	bb_private_t *bb_priv = board->private_data;
++
++	dbg_printk("DETACH");
++
++	if (bb_priv->irq) {
++		free_irq(bb_priv->irq, board);
++	}
++
++	free_private(board);
++}
++
++static struct gpio gpios[] = {
++	{D01, GPIOF_IN, "D01" },
++	{D02, GPIOF_IN, "D02" },
++	{D03, GPIOF_IN, "D03" },
++	{D04, GPIOF_IN, "D04" },
++	{D05, GPIOF_IN, "D05" },
++	{D06, GPIOF_IN, "D06" },
++	{D07, GPIOF_IN, "D07" },
++	{D08, GPIOF_IN, "D08" },
++	{EOI, GPIOF_OUT_INIT_HIGH, "EOI" },
++	{NRFD, GPIOF_IN, "NRFD" },
++	{IFC, GPIOF_OUT_INIT_HIGH, "IFC" },
++	{_ATN, GPIOF_OUT_INIT_HIGH, "ATN" },
++	{REN, GPIOF_OUT_INIT_HIGH, "REN" },
++	{DAV, GPIOF_OUT_INIT_HIGH, "DAV" },
++	{NDAC, GPIOF_IN, "NDAC" },
++	{SRQ, GPIOF_IN, "SRQ" },
++	{PE, GPIOF_OUT_INIT_LOW, "PE" },
++	{DC, GPIOF_OUT_INIT_LOW, "DC" },
++	{TE, GPIOF_OUT_INIT_LOW, "TE" },
++	{ACT_LED , GPIOF_OUT_INIT_LOW, "ACT_LED" },
++};
++
++static int __init bb_init_module(void)
++{
++	int ret = 0;
++
++	ret = gpio_request_array(gpios, ARRAY_SIZE(gpios));
++
++	if (ret) {
++		printk("Unable to request GPIOs: %d\n", ret);
++		return ret;
++	}
++
++	SET_DIR_WRITE();
++	gpio_direction_output(ACT_LED, 1);
++
++	dbg_printk("gpib_bitbang module loaded!\r\n");
++
++	gpib_register_driver(&bb_interface, THIS_MODULE);
++
++	return ret;
++}
++
++static void __exit bb_exit_module(void)
++{
++	int i;
++
++	/* all to low inputs is the safe default */
++	for(i = 0; i < ARRAY_SIZE(gpios); i++) {
++		gpio_set_value(gpios[i].gpio, 0);
++		gpio_direction_output(i, 0);
++	}
++
++	gpio_free_array(gpios, ARRAY_SIZE(gpios));
++
++	dbg_printk("gpib_bitbang module unloaded!");
++
++	gpib_unregister_driver(&bb_interface);
++}
++
++module_init(bb_init_module);
++module_exit(bb_exit_module);
++
++
++
++/***************************************************************************
++ *                                                                         *
++ * UTILITY Functions                                                       *
++ *                                                                         *
++ ***************************************************************************/
++
++void _delay(uint16_t delay)
++{
++	struct timespec before, after;
++	getnstimeofday(&before);
++
++	while(1) {
++		getnstimeofday(&after);
++		if (usec_diff(&after, &before) > delay) {
++			break;
++		}
++	}
++}
++
++inline long int usec_diff (struct timespec * a, struct timespec * b)
++{
++        return ((a->tv_sec - b->tv_sec)*1000000 +
++                (a->tv_nsec - b->tv_nsec)/1000);
++}
++
++inline long int msec_diff (struct timespec * a, struct timespec * b)
++{
++        return ((a->tv_sec - b->tv_sec)*1000 +
++                (a->tv_nsec - b->tv_nsec)/1000000);
++}
++
++inline int sec_diff (struct timespec * a, struct timespec * b)
++{
++        return ((a->tv_sec - b->tv_sec) +
++                (a->tv_nsec - b->tv_nsec)/1000000000);
++}
++
++void set_data_lines(uint8_t byte)
++{
++	gpio_direction_output(D01, !(byte & 0x01));
++	gpio_direction_output(D02, !(byte & 0x02));
++	gpio_direction_output(D03, !(byte & 0x04));
++	gpio_direction_output(D04, !(byte & 0x08));
++	gpio_direction_output(D05, !(byte & 0x10));
++	gpio_direction_output(D06, !(byte & 0x20));
++	gpio_direction_output(D07, !(byte & 0x40));
++	gpio_direction_output(D08, !(byte & 0x80));
++}
++
++uint8_t get_data_lines(void)
++{
++	uint8_t ret = 0;
++	set_data_lines_input();
++	ret += gpio_get_value(D01) * 0x01;
++	ret += gpio_get_value(D02) * 0x02;
++	ret += gpio_get_value(D03) * 0x04;
++	ret += gpio_get_value(D04) * 0x08;
++	ret += gpio_get_value(D05) * 0x10;
++	ret += gpio_get_value(D06) * 0x20;
++	ret += gpio_get_value(D07) * 0x40;
++	ret += gpio_get_value(D08) * 0x80;
++	return ~ret;
++}
++
++void set_data_lines_input(void)
++{
++	gpio_direction_input(D01);
++	gpio_direction_input(D02);
++	gpio_direction_input(D03);
++	gpio_direction_input(D04);
++	gpio_direction_input(D05);
++	gpio_direction_input(D06);
++	gpio_direction_input(D07);
++	gpio_direction_input(D08);
++}
++
++inline void SET_DIR_WRITE(void)
++{
++	_delay(DELAY);
++	gpio_set_value(DC, 0);
++	gpio_set_value(PE, 1);
++	gpio_set_value(TE, 1);
++
++	gpio_direction_output(DAV, 1);
++	gpio_direction_output(EOI, 1);
++
++	gpio_direction_input(NRFD);
++	gpio_direction_input(NDAC);
++	set_data_lines(0);
++}
++
++inline void SET_DIR_READ(void)
++{
++	_delay(DELAY);
++	gpio_set_value(DC, 1);
++	gpio_set_value(PE, 0);
++	gpio_set_value(TE, 0);
++	gpio_direction_output(NRFD, 0);
++	gpio_direction_output(NDAC, 0); // Assert NDAC, informing the talker we have not yet accepted the byte
++
++	gpio_direction_input(DAV);
++	gpio_direction_input(EOI);
++	set_data_lines_input();
++}
+diff -Naur linux-gpib-4.0.3/drivers/gpib/raspi_gpio/raspi_gpio.h linux-gpib-4.0.3/drivers/gpib/raspi_gpio/raspi_gpio.h
+--- linux-gpib-4.0.3/drivers/gpib/raspi_gpio/raspi_gpio.h	1970-01-01 01:00:00.000000000 +0100
++++ linux-gpib-4.0.3/drivers/gpib/raspi_gpio/raspi_gpio.h	2017-04-27 18:42:30.539342821 +0200
+@@ -0,0 +1,98 @@
++/***************************************************************************
++ *                        raspi_gpio.h  -  description                   *
++ *                           -------------------                           *
++ *  This code has been developed at the Institute of Sensor and Actuator   *
++ *  Systems (Technical University of Vienna, Austria) to enable the GPIO   *
++ *  lines (e.g. of a raspberry pi) to function as a GPIO master device     *
++ *                                                                         *
++ *  begin                : March 2016                                      *
++ *  copyright            : (C) 2016 Thomas Klima                           *
++ *  email                : elektronomikon@gmail.com                        *
++ *                                                                         *
++ ***************************************************************************/
++
++/***************************************************************************
++ *                                                                         *
++ *   This program is free software; you can redistribute it and/or modify  *
++ *   it under the terms of the GNU General Public License as published by  *
++ *   the Free Software Foundation; either version 2 of the License, or     *
++ *   (at your option) any later version.                                   *
++ *                                                                         *
++ ***************************************************************************/
++
++#ifndef _GPIB_BITBANG_H
++#define _GPIB_BITBANG_H
++
++#define DEBUG 1
++#define TIMEOUT_US 200000
++#define IRQ_DEBOUNCE_US 1000
++#define DELAY 10
++
++
++#include "gpibP.h"
++#include <linux/sched.h>
++#include <linux/module.h>
++#include <linux/slab.h>
++#include <linux/string.h>
++#include <linux/init.h>
++#include <linux/gpio/consumer.h>
++#include <linux/gpio.h>
++
++
++//  GPIB signal to GPIO pin-number mappings
++
++typedef enum {
++	D01 = 20,
++	D02 = 26,
++	D03 = 16,
++	D04 = 19,
++	D05 = 13,
++	D06 = 12,
++	D07 = 6,
++	D08 = 5,
++	EOI = 9,
++	NRFD = 24,
++	IFC = 22,
++	_ATN = 25,
++	REN = 27,
++	DAV = 10,
++	NDAC = 23,
++	SRQ = 11,
++	PE = 7,
++	DC = 8,
++	TE = 18,
++	ACT_LED = 4,
++} lines_t;
++
++// struct which defines private_data for gpio driver
++typedef struct
++{
++	int irq;
++	uint8_t eos;	// eos character
++	short eos_flags; // eos mode
++} bb_private_t;
++
++// interfaces
++extern gpib_interface_t bb_interface;
++
++#define dbg_printk(...) {if (DEBUG) printk(KERN_INFO __VA_ARGS__);}
++
++int bb_attach(gpib_board_t *board, gpib_board_config_t config);
++void bb_detach(gpib_board_t *board);
++int bb_line_status(const gpib_board_t *board );
++inline long int usec_diff(struct timespec *a, struct timespec *b);
++inline long int msec_diff(struct timespec *a, struct timespec *b);
++inline int sec_diff(struct timespec *a, struct timespec * b);
++void set_data_lines(uint8_t byte);
++uint8_t get_data_lines(void);
++void set_data_lines_input(void);
++int check_for_eos(bb_private_t *priv, uint8_t byte);
++irqreturn_t bb_interrupt(int irq, void *arg PT_REGS_ARG);
++
++void _delay(uint16_t delay);
++inline void SET_DIR_WRITE(void);
++inline void SET_DIR_READ(void);
++
++
++
++#endif	// _GPIB_BITBANG_H
