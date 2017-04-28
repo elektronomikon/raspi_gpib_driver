@@ -18,7 +18,7 @@ diff -Naur linux-gpib-4.0.3/drivers/gpib/raspi_gpio/raspi_gpio.c linux-gpib-4.0.
 +++ linux-gpib-4.0.3/drivers/gpib/raspi_gpio/raspi_gpio.c	2017-04-27 18:52:09.158893422 +0200
 @@ -0,0 +1,692 @@
 +/**************************************************************************
-+ *                      raspi_gpio.c  -  description                    *
++ *                      raspi_gpio.c  -  description                      *
 + *                           -------------------                          *
 + *  This code has been developed at the Institute of Sensor and Actuator  *
 + *  Systems (Technical University of Vienna, Austria) to enable the GPIO  *
@@ -29,9 +29,9 @@ diff -Naur linux-gpib-4.0.3/drivers/gpib/raspi_gpio/raspi_gpio.c linux-gpib-4.0.
 + *  email                : elektronomikon@gmail.com                       *
 + *                                                                        *
 + *                                                                        *
-+ *  Special Thanks go to: Marcello Carla'  -  carla@fi.infn.it		  *
++ *  Special Thanks go to: Marcello Carla'  -  carla@fi.infn.it		          *
 + *                        University of Florence - Dept. of Physics       *
-+ *		for adding the interrupt-driven handshake		  *
++ *	                         	for adding the interrupt-driven handshake		  *
 + *                                                                        *
 + *************************************************************************/
 +
