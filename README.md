@@ -39,7 +39,11 @@ build linux-gpib
 
 USAGE
 
-The driver creates a new type of board_type for gpib.conf (example raspi_gpib_driver/gpib.conf)
+The driver creates a new type of board_type for gpib.conf
+
+example gpib.conf:
+
+https://github.com/elektronomikon/raspi_gpib_driver/blob/master/gpib.conf
 
 To get quick access, try:
 `ibterm -d0`
