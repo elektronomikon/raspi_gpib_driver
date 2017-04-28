@@ -37,6 +37,13 @@ build linux-gpib
 `  sudo make install`
 
 
+USAGE
+
+The driver creates a new type of board_type for gpib.conf (example )
+
+To get quick access, try:
+`ibterm -d0`
+
 
 have fun,
 Thomas
