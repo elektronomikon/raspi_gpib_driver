@@ -2,7 +2,7 @@
 A driver for linux-gpib to connect the Raspberry Pi to any GPIB device via its GPIO interface.
 
 Intended to be used in conjunktion with the raspi_gpib_shield (https://github.com/elektronomikon/raspi_gpib_shield)
-
+Preassembled devices can be found at https://elektronomikon.org
 
 INSTALLATION
 
@@ -47,7 +47,6 @@ https://github.com/elektronomikon/raspi_gpib_driver/blob/master/gpib.conf
 
 To get quick access, try:
 `ibterm -d0`
-
 
 have fun,
 Thomas
