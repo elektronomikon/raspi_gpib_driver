@@ -56,6 +56,11 @@ diff -Naur linux-gpib-4.0.3/drivers/gpib/raspi_gpio/raspi_gpio.c linux-gpib-4.0.
 +
 +MODULE_LICENSE("GPL");
 +
++struct timer_list g_timer;
++
++void TimerHandler(unsigned long data) {
++        gpio_direction_output(ACT_LED, 0);
++}
 +
 +/***************************************************************************
 + *                                                                         *
@@ -182,6 +187,9 @@ diff -Naur linux-gpib-4.0.3/drivers/gpib/raspi_gpio/raspi_gpio.c linux-gpib-4.0.
 +{
 +	struct timespec before, after;
 +	size_t i = 0;
++
++ gpio_direction_output(ACT_LED, 1);
++ mod_timer(&g_timer, jiffies + msecs_to_jiffies(100));
 +
 +	if (DEBUG) {
 +		dbg_printk("\r\nWR<%d> %s (", length, (send_eoi)?"w.EOI":" ");
@@ -574,7 +582,8 @@ diff -Naur linux-gpib-4.0.3/drivers/gpib/raspi_gpio/raspi_gpio.c linux-gpib-4.0.
 +	}
 +
 +	SET_DIR_WRITE();
-+	gpio_direction_output(ACT_LED, 1);
++	gpio_direction_output(ACT_LED, 0);
++ setup_timer(&g_timer, TimerHandler, 0);
 +
 +	dbg_printk("gpib_bitbang module loaded!\r\n");
 +
