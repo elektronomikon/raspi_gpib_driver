@@ -12,25 +12,19 @@ download the current stable linux-gpib release (4.0.3 at this time)
 
 extract linux-gpib with folder names in the new folder:
 
-`  tar xzf linux-gpib-4.0.3.tar.gz`
+`  tar xzf linux-gpib-4.1.0.tar.gz`
 
 configure linux-gpib:
 
-`  cd linux-gpib-4.0.3`
+`  cd linux-gpib-4.1.0`
 
 `  ./configure`
 
-this creates the needed build files
+this creates the needed build files. Apply the patch to add the gpio driver:
 
-change back to the other folder and apply the patch with:
-
-`  cd ..`
-
-`  patch -p0 < RasPi_GPIB_driver.patch`
+`  patch -p1 < gpio_driver_4.1.0.patch`
 
 build linux-gpib
-
-`cd linux-gpib-4.0.3`
 
 `  make`
 
