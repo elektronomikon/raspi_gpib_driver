@@ -39,7 +39,11 @@ example gpib.conf:
 
 https://github.com/elektronomikon/raspi_gpib_driver/blob/master/gpib.conf
 
+(the entry "board_type" must match the name of the compiled kernel module)
+
+
 To get quick access, try:
+`gpib_config` to initialize linux-gpib and create /dev/gpib0
 `ibterm -d0`
 
 have fun,
