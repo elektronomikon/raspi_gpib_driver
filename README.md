@@ -44,7 +44,7 @@ https://github.com/elektronomikon/raspi_gpib_driver/blob/master/gpib.conf
 
 To get quick access, try:
 `gpib_config` to initialize linux-gpib and create /dev/gpib0
-`ibterm -d0`
+`ibterm -d<primary_addr>`
 
 have fun,
 Thomas
