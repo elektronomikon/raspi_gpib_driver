@@ -8,26 +8,28 @@ INSTALLATION
 
 clone or download the patch in a new folder
 
-download the current stable linux-gpib release (4.0.3 at this time)
+download the current stable linux-gpib release (4.2.0 at this time)
 
 extract linux-gpib with folder names in the new folder:
 
-`  tar xzf linux-gpib-4.1.0.tar.gz`
+`  tar xzf linux-gpib-4.2.0.tar.gz`
+`  cd linux-gpib-4.2.0`
 
-configure linux-gpib:
+configure linux-gpib-kernel:
 
-`  cd linux-gpib-4.1.0`
-
+`  tar xzf linux-gpib-kernel-4.2.0.tar.gz`
+`  cd linux-gpib-kernel-4.2.0`
 `  ./configure`
 
-this creates the needed build files. Apply the patch to add the gpio driver:
+this creates the needed build files. Copy the patch in the linux-gpib-4.2.0 folder, and apply it to add the raspi_gpib driver:
 
-`  patch -p1 < gpio_driver_4.1.0.patch`
+`  cd ..`
+`  patch -p0 < linux-gpib-kernel-4.2.0_raspi_gpib.patch`
 
-build linux-gpib
+build linux-gpib-kernel:
 
+`  cd linux-gpib-kernel-4.2.0`
 `  make`
-
 `  sudo make install`
 
 
@@ -44,7 +46,7 @@ https://github.com/elektronomikon/raspi_gpib_driver/blob/master/gpib.conf
 
 To get quick access, try:
 `gpib_config` to initialize linux-gpib and create /dev/gpib0
-`ibterm -d<primary_addr>`
+`ibterm -d<primary_addr> -s<secondary_addr>`
 
 have fun,
 Thomas
