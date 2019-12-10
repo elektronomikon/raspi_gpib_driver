@@ -15,13 +15,13 @@ extract linux-gpib with folder names in the new folder:
 `  tar xzf linux-gpib-4.2.0.tar.gz`
 `  cd linux-gpib-4.2.0`
 
-configure linux-gpib-kernel:
+extract and configure linux-gpib-kernel:
 
 `  tar xzf linux-gpib-kernel-4.2.0.tar.gz`
 `  cd linux-gpib-kernel-4.2.0`
 `  ./configure`
 
-this creates the needed build files. Copy the patch in the linux-gpib-4.2.0 folder, and apply it to add the raspi_gpib driver:
+this creates the needed build files. Download the patch file and copy it to the linux-gpib-4.2.0 folder (the parent of linux-gpib-kernel-4.2.0). Apply it to add the raspi_gpib driver:
 
 `  cd ..`
 `  patch -p0 < linux-gpib-kernel-4.2.0_raspi_gpib.patch`
