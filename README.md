@@ -48,5 +48,9 @@ To get quick access, try:
 `gpib_config` to initialize linux-gpib and create /dev/gpib0
 `ibterm -d<primary_addr> -s<secondary_addr>`
 
+Thanks go to:
+Marcello Carla for adding the interrupt driven handshake
+Sebastian Weiss (dl3yc) for the timespec64 update
+
 have fun,
 Thomas
