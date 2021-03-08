@@ -41,7 +41,7 @@ struct gpio_desc *D01, *D02, *D03, *D04, *D05, *D06, *D07, *D08, *EOI, *NRFD, *I
 uint8_t raspi_gpib_read_byte(int *end)
 {
 	uint8_t data;
-	struct timespec before, after;
+	struct timespec64 before, after;
 
 	gpiod_direction_output(ACT_LED, 1);
 
@@ -49,10 +49,10 @@ uint8_t raspi_gpib_read_byte(int *end)
 	gpiod_direction_input(NRFD);
 
 	/* Wait for DAV to go low, informing us the byte is read to be read */
-	getnstimeofday(&before);
+	ktime_get_ts64(&before);
 	while (gpiod_get_value(DAV) == 1) {
 		_delay(DELAY);
-		getnstimeofday(&after);
+		ktime_get_ts64(&after);
 		if (usec_diff(&after, &before) > TIMEOUT_US) {
 			dbg_printk("read_byte_timeout1\r\n");
 			data = -ETIMEDOUT;
@@ -72,10 +72,10 @@ uint8_t raspi_gpib_read_byte(int *end)
 	gpiod_direction_input(NDAC);
 
 	// Wait for DAV to go high; the talkers knows that we have read the byte
-	getnstimeofday(&before);
+	ktime_get_ts64(&before);
 	while(gpiod_get_value(DAV) == 0) {
 		_delay(DELAY);
-		getnstimeofday(&after);
+		ktime_get_ts64(&after);
 		if (usec_diff(&after, &before) > TIMEOUT_US) {
 			dbg_printk("read_byte_timeout2\r\n");
 			data = -ETIMEDOUT;
@@ -93,7 +93,7 @@ out:
 int raspi_gpib_read(gpib_board_t *board, uint8_t *buffer, size_t length, int *end, size_t *bytes_read)
 {
 	raspi_gpib_private_t *priv = board->private_data;
-	struct timespec before;
+	struct timespec64 before;
 
 	dbg_printk("RD(%ld) ", (long int)length);
 
@@ -103,7 +103,7 @@ int raspi_gpib_read(gpib_board_t *board, uint8_t *buffer, size_t length, int *en
 	*bytes_read = 0;
 	if (length == 0) return 0;
 
-	getnstimeofday(&before);
+	ktime_get_ts64(&before);
 	while(1) {
 		_delay(DELAY);
 
@@ -151,7 +151,7 @@ int check_for_eos(raspi_gpib_private_t *priv, uint8_t byte)
 
 int raspi_gpib_write(gpib_board_t *board, uint8_t *buffer, size_t length, int send_eoi, size_t *bytes_written)
 {
-	struct timespec before, after;
+	struct timespec64 before, after;
 	size_t i = 0;
 	*bytes_written = 0;
 
@@ -167,10 +167,10 @@ int raspi_gpib_write(gpib_board_t *board, uint8_t *buffer, size_t length, int se
 	gpiod_direction_output(DAV, 1);
 	_delay(DELAY);
 
-	getnstimeofday(&before);
+	ktime_get_ts64(&before);
 	while ((gpiod_get_value(NRFD) == 0) || (gpiod_get_value(NDAC) == 1)) {
 		_delay(DELAY);
-		getnstimeofday(&after);
+		ktime_get_ts64(&after);
 		if (usec_diff(&after, &before) > TIMEOUT_US) {
 			printk("\r\nwrite timeout NDAC(%d)|NRFD(%d) S=%d!\r\n", gpiod_get_value(NDAC), gpiod_get_value(NRFD), raspi_gpib_line_status(board));
 			return -ETIMEDOUT;
@@ -188,11 +188,11 @@ int raspi_gpib_write(gpib_board_t *board, uint8_t *buffer, size_t length, int se
 		}
 
 		_delay(DELAY);
-		getnstimeofday(&before);
+		ktime_get_ts64(&before);
 
 		while (gpiod_get_value(NRFD) == 0) {
 			_delay(DELAY);
-			getnstimeofday(&after);
+			ktime_get_ts64(&after);
 			if (usec_diff(&after, &before) > TIMEOUT_US*10)
 			{
 				printk("\r\ntimeout NRF3(%d)@3\r\n", gpiod_get_value(NRFD));
@@ -209,10 +209,10 @@ int raspi_gpib_write(gpib_board_t *board, uint8_t *buffer, size_t length, int se
 		gpiod_direction_output(DAV, 0);
 		_delay(DELAY);
 
-		getnstimeofday(&before);
+		ktime_get_ts64(&before);
 		while (gpiod_get_value(NDAC) == 0) {
 			_delay(DELAY);
-			getnstimeofday(&after);
+			ktime_get_ts64(&after);
 			if (usec_diff(&after, &before) > TIMEOUT_US)
 			{
                                 printk("timeout NDAC(%d)@4\r\n", gpiod_get_value(NDAC));
@@ -447,16 +447,16 @@ static void free_private(gpib_board_t *board)
 	}
 }
 
-struct timespec last_irq;
+struct timespec64 last_irq;
 
 irqreturn_t raspi_gpib_interrupt(int irq, void *arg PT_REGS_ARG)
 {
         unsigned long flags;
-	struct timespec current_time;
+	struct timespec64 current_time;
 
         local_irq_save(flags);
 
-        getnstimeofday(&current_time);
+        ktime_get_ts64(&current_time);
 	if (usec_diff(&current_time, &last_irq) < IRQ_DEBOUNCE_US) {
 		return IRQ_NONE;
 	}
@@ -465,7 +465,7 @@ irqreturn_t raspi_gpib_interrupt(int irq, void *arg PT_REGS_ARG)
 
         local_irq_restore(flags);
 
-	getnstimeofday(&last_irq);
+	ktime_get_ts64(&last_irq);
 
         return IRQ_HANDLED;
 }
@@ -490,7 +490,7 @@ int raspi_gpib_attach(gpib_board_t *board, const gpib_board_config_t *config)
 		return -1;
 	}
 	dbg_printk("IRQ=%d registered\r\n", raspi_gpib_priv->irq);
-	getnstimeofday(&last_irq); // initialize debounce
+	ktime_get_ts64(&last_irq); // initialize debounce
 
 	return 0;
 }
@@ -590,30 +590,30 @@ module_exit(raspi_gpib_exit_module);
 
 void _delay(uint16_t delay)
 {
-	struct timespec before, after;
-	getnstimeofday(&before);
+	struct timespec64 before, after;
+	ktime_get_ts64(&before);
 
 	while(1) {
-		getnstimeofday(&after);
+		ktime_get_ts64(&after);
 		if (usec_diff(&after, &before) > delay) {
 			break;
 		}
 	}
 }
 
-inline long int usec_diff (struct timespec * a, struct timespec * b)
+inline long int usec_diff (struct timespec64 * a, struct timespec64 * b)
 {
         return ((a->tv_sec - b->tv_sec)*1000000 +
                 (a->tv_nsec - b->tv_nsec)/1000);
 }
 
-inline long int msec_diff (struct timespec * a, struct timespec * b)
+inline long int msec_diff (struct timespec64 * a, struct timespec64 * b)
 {
         return ((a->tv_sec - b->tv_sec)*1000 +
                 (a->tv_nsec - b->tv_nsec)/1000000);
 }
 
-inline int sec_diff (struct timespec * a, struct timespec * b)
+inline int sec_diff (struct timespec64 * a, struct timespec64 * b)
 {
         return ((a->tv_sec - b->tv_sec) +
                 (a->tv_nsec - b->tv_nsec)/1000000000);
