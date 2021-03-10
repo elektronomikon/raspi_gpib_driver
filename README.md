@@ -1,3 +1,7 @@
+NEWS 2021-03-10:
+Work is currently underway to merge this driver with work from Marcello Carla into the official linux-gpib tree.
+(preview under for_linux-gpib-4.3.4)
+
 # raspi_gpib_driver
 A driver for linux-gpib to connect the Raspberry Pi to any GPIB device via its GPIO interface.
 
