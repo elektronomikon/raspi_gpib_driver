@@ -769,6 +769,9 @@ static int __init bb_init_module(void)
         PE = gpio_to_desc(PE_pin_nr);
         DC = gpio_to_desc(DC_pin_nr);
         TE = gpio_to_desc(TE_pin_nr);
+        gpiod_direction_output(DC, 1);
+        gpiod_direction_output(PE, 0);
+        gpiod_direction_output(TE, 0);
 	}
 
         ACT_LED = gpio_to_desc(ACT_LED_pin_nr);
