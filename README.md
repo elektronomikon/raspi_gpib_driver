@@ -5,7 +5,8 @@ Intended to be used in conjunktion with the raspi_gpib_shield (https://github.co
 Preassembled devices can be found at https://elektronomikon.org
 
 UPDATE 2021-05:
-The raspi_gpib_driver has been integrated into linux-gpib (https://linux-gpib.sourceforge.io/) with Version 4.3.4 as a general "gpib_bitbang" driver, please use the official source or package.
+The raspi_gpib_driver has been integrated into linux-gpib (https://linux-gpib.sourceforge.io/) with Version 4.3.4 as
+a general "gpib_bitbang" driver, please use the official source or package.
 This repository will be preserved to maintain support for older linux-gpib Versions.
 
 USAGE
