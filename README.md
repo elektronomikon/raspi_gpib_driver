@@ -7,6 +7,9 @@ Preassembled devices can be found at https://elektronomikon.org
 UPDATE 2021-05:
 The raspi_gpib_driver has been integrated into linux-gpib (https://linux-gpib.sourceforge.io/) with Version 4.3.4 as
 a general "gpib_bitbang" driver, please use the official source or package.
+To use the driver ic's, support is found in
+https://sourceforge.net/p/linux-gpib/code/HEAD/tree/trunk/linux-gpib-kernel/drivers/gpib/gpio/gpib_bitbang.c
+which will be released in a later version.
 
 This repository will be preserved to maintain support for older linux-gpib Versions.
 
